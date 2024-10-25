@@ -1,0 +1,112 @@
+<!-- views/live-stream.ejs -->
+<div class="container">
+    <h2>Live Stream</h2>
+    
+    <div id="errorContainer" style="display: none;" class="alert alert-danger"></div>
+    
+    <div class="video-container">
+        <video id="streamVideo" autoplay playsinline></video>
+    </div>
+    
+    <div class="controls">
+        <button 
+            id="streamToggleButton"
+            class="btn btn-success"
+            onclick="toggleStream()"
+        >
+            Start Stream
+        </button>
+        
+        <span id="liveIndicator" style="display: none;" class="live-indicator">LIVE</span>
+    </div>
+</div>
+
+<script>
+    let isStreaming = false;
+    let socket;
+
+    document.addEventListener('DOMContentLoaded', function() {
+        socket = io();
+
+        socket.on("stream-error", function(data) {
+            showError(data.message);
+            setStreamingState(false);
+        });
+
+        socket.on("stream-data", function(data) {
+            // Handle incoming stream data
+            // This will depend on how you're sending video data
+        });
+    });
+
+    function toggleStream() {
+        if (isStreaming) {
+            stopStream();
+        } else {
+            startStream();
+        }
+    }
+
+    function startStream() {
+        socket.emit("start-stream", {
+            userId: "<%= user._id %>",
+            channelId: "<%= channel._id %>",
+            title: "Live Stream",
+            description: "Live stream from robotic arm"
+        });
+        setStreamingState(true);
+    }
+
+    function stopStream() {
+        socket.emit("end-stream");
+        setStreamingState(false);
+    }
+
+    function setStreamingState(streaming) {
+        isStreaming = streaming;
+        const button = document.getElementById('streamToggleButton');
+        const indicator = document.getElementById('liveIndicator');
+        
+        if (streaming) {
+            button.textContent = 'End Stream';
+            button.classList.remove('btn-success');
+            button.classList.add('btn-danger');
+            indicator.style.display = 'inline';
+        } else {
+            button.textContent = 'Start Stream';
+            button.classList.remove('btn-danger');
+            button.classList.add('btn-success');
+            indicator.style.display = 'none';
+        }
+    }
+
+    function showError(message) {
+        const errorContainer = document.getElementById('errorContainer');
+        errorContainer.textContent = message;
+        errorContainer.style.display = 'block';
+    }
+</script>
+
+<style>
+    .video-container {
+        width: 100%;
+        max-width: 800px;
+        margin: 20px 0;
+    }
+    
+    .video-container video {
+        width: 100%;
+        background-color: #000;
+    }
+    
+    .live-indicator {
+        margin-left: 10px;
+        color: red;
+        font-weight: bold;
+        animation: blink 1s infinite;
+    }
+    
+    @keyframes blink {
+        50% { opacity: 0.5; }
+    }
+</style>
