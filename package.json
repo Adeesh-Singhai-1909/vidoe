@@ -1,8 +1,7 @@
 {
-  "engines":{
+  "engines": {
     "node": "20.13.1"
   },
-
   "name": "server",
   "version": "1.0.0",
   "description": "",
@@ -25,6 +24,7 @@
     "get-video-duration": "^1.0.3",
     "http": "0.0.0",
     "mongodb": "^3.5.2",
+    "mongoose": "^8.7.3",
     "multer": "^1.4.5-lts.1",
     "multer-storage-cloudinary": "^4.0.0",
     "nodemailer": "^6.4.11",
