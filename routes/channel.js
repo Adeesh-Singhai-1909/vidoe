@@ -1,8 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const ObjectId = require("mongodb").ObjectId;
-
-
+const { User } = require('../models/User'); // Import the User model
+const mongoose = require('mongoose');
 
 const isLoggedIn = (req, res, next) => {
     if (req.session.user_id) {
@@ -12,13 +11,20 @@ const isLoggedIn = (req, res, next) => {
     }
 };
 
-router.get("/", function (request, result) {
-    const database = request.app.locals.database;
+router.get("/", async function (request, result) {
+    try {
+        // Validate if the channel ID is a valid ObjectId
+        if (!mongoose.Types.ObjectId.isValid(request.query.c)) {
+            return result.render("404", {
+                isLogin: request.session.user_id ? true : false,
+                message: "Invalid channel ID",
+                url: request.url
+            });
+        }
 
-    database.collection("users").findOne({
-        _id: ObjectId(request.query.c)
-    }, function (error1, user) {
-        if (user == null) {
+        const user = await User.findById(request.query.c);
+
+        if (!user) {
             result.render("404", {
                 isLogin: request.session.user_id ? true : false,
                 message: "Channel not found",
@@ -36,15 +42,24 @@ router.get("/", function (request, result) {
                 error: request.query.error ? request.query.error : ""
             });
         }
-    });
+    } catch (error) {
+        console.error('Error fetching channel:', error);
+        result.render("404", {
+            isLogin: request.session.user_id ? true : false,
+            message: "Error loading channel",
+            url: request.url
+        });
+    }
 });
 
-router.get("/my_channel", isLoggedIn, function (request, result) {
-    const database = request.app.locals.database;
-    
-    database.collection("users").findOne({
-        _id: ObjectId(request.session.user_id)
-    }, function (error1, user) {
+router.get("/my_channel", isLoggedIn, async function (request, result) {
+    try {
+        const user = await User.findById(request.session.user_id);
+
+        if (!user) {
+            return result.redirect("/login");
+        }
+
         result.render("single-channel", {
             isLogin: true,
             user: user,
@@ -55,7 +70,14 @@ router.get("/my_channel", isLoggedIn, function (request, result) {
             error: request.query.error ? request.query.error : "",
             url: request.url
         });
-    });
+    } catch (error) {
+        console.error('Error fetching my channel:', error);
+        result.render("404", {
+            isLogin: true,
+            message: "Error loading your channel",
+            url: request.url
+        });
+    }
 });
 
 module.exports = router;

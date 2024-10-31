@@ -1,14 +1,24 @@
+if(process.env.NODE_ENV!=='production'){
+  require("dotenv").config();
+
+}
+
+
 const express = require("express");
 const app = express();
 const http = require("http").createServer(app);
 const socketIO = require("socket.io")(http);
 const formidable = require("formidable");
 const fileSystem = require("fs");
-const mongoClient = require("mongodb").MongoClient;
+const mongoose = require("mongoose");
 const bodyParser = require("body-parser");
 const expressSession = require("express-session");
-const { ObjectId } = require("mongodb");
-const { getVideoDurationInSeconds } = require("get-video-duration");
+const nodemailer = require("nodemailer");
+
+// Import models
+const { User, Video } = require("./models/User");
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Import existing routers
 const authRouter = require("./routes/auth");
@@ -17,74 +27,51 @@ const videoRouter = require("./routes/video");
 const channelRouter = require("./routes/channel");
 const interactionRouter = require("./routes/interaction");
 const searchRoutes = require('./routes/search');
-
 const settingsRoutes = require('./routes/settings');
-// New streaming router
 const streamRouter = require("./routes/stream");
+
 const mainURL = "http://localhost:3000";
 
-var nodemailer = require("nodemailer");
+// Middleware setup
 app.use(express.json());
-
 app.use(bodyParser.json({ limit: "10000mb" }));
-app.use(
-  bodyParser.urlencoded({
-    extended: true,
-    limit: "10000mb",
-    parameterLimit: 1000000,
-  })
-);
+app.use(bodyParser.urlencoded({
+  extended: true,
+  limit: "10000mb",
+  parameterLimit: 1000000,
+}));
 
-app.use(
-  expressSession({
-    key: "user_id",
-    secret: "User secret object ID",
-    resave: true,
-    saveUninitialized: true,
-  })
-);
+app.use(expressSession({
+  key: "user_id",
+  secret: "User secret object ID",
+  resave: true,
+  saveUninitialized: true,
+}));
 
 app.use("/public", express.static(__dirname + "/public"));
 app.set("view engine", "ejs");
 
-let database = null;
+const dbUrl = process.env.ATLASDB_URL ;
 
-mongoClient.connect(
-  "mongodb://localhost:27017",
-  { useUnifiedTopology: true },
-  function (error, client) {
-    if (error) {
-      console.log(error);
-      return;
-    }
-    database = client.db("youtube");
+// Connect to MongoDB using Mongoose
+main().catch((err) => console.log(err));
 
-    // Share database with routers
-    app.locals.database = database;
+async function main() {
+  await mongoose.connect(dbUrl);
+  console.log("Connected to DB");
+}
+
+// Helper function to get user (now using Mongoose)
+const getUser = async (userId) => {
+  try {
+    return await User.findById(userId);
+  } catch (error) {
+    console.error("Error in getUser:", error);
+    return null;
   }
-);
-
-// Export getUser function for use in routers
-getUser = function (userId, callBack) {
-  database.collection("users").findOne(
-    {
-      _id: ObjectId(userId),
-    },
-    function (error, result) {
-      if (error) {
-        console.log(error);
-        return;
-      }
-      if (callBack != null) {
-        callBack(result);
-      }
-    }
-  );
 };
 
-module.exports = getUser;
-
-// Make getUser available to routers
+// Make getUser available to routes
 app.set("getUser", getUser);
 
 // Use routers
@@ -93,100 +80,69 @@ app.use("/", authRouter);
 app.use("/", videoRouter);
 app.use("/", channelRouter);
 app.use("/video", videoRouter);
-
 app.use("/channel", channelRouter);
 app.use("/", interactionRouter);
 app.use('/search', searchRoutes);
 app.use('/my_settings', settingsRoutes);
 
+// Update social media link endpoint
+app.post("/update-social-media-link", (req, res) => {
+  res.json({
+    status: "success",
+    message: "Video has been liked",
+  });
+});
 
-http.listen(
-  3000,
-  function () {
-    console.log("Server started at http://localhost:3000/");
+// Delete video endpoint (updated to use Mongoose)
+app.get("/delete-video", async (req, res) => {
+  if (!req.session.user_id) {
+    return res.redirect("/login");
+  }
 
-
-
-  
-
-    app.post("/update-social-media-link", function (request, result) {
-      result.json({
-        status: "success",
-        message: "Video has been liked",
-      });
+  try {
+    // Find the video
+    const video = await Video.findOne({
+      'user._id': req.session.user_id,
+      watch: parseInt(req.query.v)
     });
 
-    app.get("/delete-video", function (request, result) {
-      if (request.session.user_id) {
-        database.collection("videos").findOne(
-          {
-            $and: [
-              {
-                "user._id": ObjectId(request.session.user_id),
-              },
-              {
-                watch: parseInt(request.query.v),
-              },
-            ],
-          },
-          function (error1, video) {
-            if (video == null) {
-              result.render("404", {
-                isLogin: true,
-                message: "Sorry, you do not own this video.",
-              });
-            } else {
-              database.collection("videos").findOne(
-                {
-                  _id: ObjectId(video._id),
-                },
-                function (error3, videoData) {
-                  fileSystem.unlink(videoData.filePath, function (errorUnlink) {
-                    if (errorUnlink) {
-                      console.log(errorUnlink);
-                    }
+    if (!video) {
+      return res.render("404", {
+        isLogin: true,
+        message: "Sorry, you do not own this video.",
+      });
+    }
 
-                    database.collection("videos").remove({
-                      $and: [
-                        {
-                          _id: ObjectId(video._id),
-                        },
-                        {
-                          "user._id": ObjectId(request.session.user_id),
-                        },
-                      ],
-                    });
-                  });
-                }
-              );
+    // Delete the video file
+    try {
+      await fileSystem.promises.unlink(video.filePath);
+    } catch (error) {
+      console.error("Error deleting file:", error);
+    }
 
-              database.collection("users").findOneAndUpdate(
-                {
-                  _id: ObjectId(request.session.user_id),
-                },
-                {
-                  $pull: {
-                    videos: {
-                      _id: ObjectId(video._id),
-                    },
-                  },
-                },
-                function (error2, data) {
-                  result.redirect("/my_channel");
-                }
-              );
-            }
-          }
-        );
-      } else {
-        result.redirect("/login");
+    // Remove video from Videos collection
+    await Video.findByIdAndDelete(video._id);
+
+    // Remove video from user's videos array
+    await User.findByIdAndUpdate(req.session.user_id, {
+      $pull: {
+        videos: {
+          _id: video._id
+        }
       }
     });
+
+    res.redirect("/my_channel");
+  } catch (error) {
+    console.error("Error in delete-video:", error);
+    res.status(500).send("Error deleting video");
   }
-  // end of Mongo DB
-); //  end of HTTP.listen
+});
 
-
+// Start server
+http.listen(3000, () => {
+  console.log("Server started at http://localhost:3000/");
+});
 
 
 

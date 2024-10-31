@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require("bcryptjs");
+const { User } = require('../models/User'); // Import the User model
 
 router.get("/register", function (request, result) {
     if (request.session.user_id) {
@@ -13,8 +14,7 @@ router.get("/register", function (request, result) {
     });
 });
 
-router.post("/register", function (request, result) {
-    const database = request.app.locals.database;
+router.post("/register", async function (request, result) {
     const { first_name, last_name, email, password } = request.body;
 
     if (first_name == "" || last_name == "" || email == "" || password == "") {
@@ -25,43 +25,43 @@ router.post("/register", function (request, result) {
         return;
     }
 
-    database.collection("users").findOne({
-        "email": email
-    }, function (error1, user) {
-        if (error1) {
-            console.log(error1);
-            return;
-        }
+    try {
+        // Check if user already exists
+        const existingUser = await User.findOne({ email });
+        
+        if (!existingUser) {
+            // Hash password
+            const salt = await bcrypt.genSalt(10);
+            const hash = await bcrypt.hash(password, salt);
 
-        if (user == null) {
-            bcrypt.genSalt(10, function(err, salt) {
-                bcrypt.hash(password, salt, async function(err, hash) {
-                    database.collection("users").insertOne({
-                        "first_name": first_name,
-                        "last_name": last_name,
-                        "email": email,
-                        "password": hash,
-                        "subscribers": []
-                    }, function (error2, data) {
-                        if (error2) {
-                            console.log(error2);
-                            return;
-                        }
+            // Create new user
+            const newUser = new User({
+                first_name,
+                last_name,
+                email,
+                password: hash,
+                subscribers: []
+            });
 
-                        result.render("register", {
-                            "error": "Email verification is in premium version. Kindly read README.txt to get full version.",
-                            "message": "Signed up successfully. You can login now."
-                        });
-                    });
-                })
-            })
+            await newUser.save();
+
+            result.render("register", {
+                "error": "Email verification is in premium version. Kindly read README.txt to get full version.",
+                "message": "Signed up successfully. You can login now."
+            });
         } else {
             result.render("register", {
                 "error": "Email already exists",
                 "message": ""
             });
         }
-    });
+    } catch (error) {
+        console.error(error);
+        result.render("register", {
+            "error": "An error occurred during registration",
+            "message": ""
+        });
+    }
 });
 
 router.get("/login", function (request, result) {
@@ -75,8 +75,7 @@ router.get("/login", function (request, result) {
     });
 });
 
-router.post("/login", function (request, result) {
-    const database = request.app.locals.database;
+router.post("/login", async function (request, result) {
     const { email, password } = request.body;
 
     if (email == "" || password == "") {
@@ -87,33 +86,34 @@ router.post("/login", function (request, result) {
         return;
     }
 
-    database.collection("users").findOne({
-        "email": email
-    }, function (error1, user) {
-        if (error1) {
-            console.log(error1);
-            return;
-        }
+    try {
+        const user = await User.findOne({ email });
 
-        if (user == null) {
+        if (!user) {
             result.render("login", {
                 "error": "Email does not exist",
                 "message": ""
             });
         } else {
-            bcrypt.compare(password, user.password, function (error2, res) {
-                if (res === true) {
-                    request.session.user_id = user._id;
-                    result.redirect("/");
-                } else {
-                    result.render("login", {
-                        "error": "Password is not correct",
-                        "message": ""
-                    });
-                }
-            });
+            const isMatch = await bcrypt.compare(password, user.password);
+            
+            if (isMatch) {
+                request.session.user_id = user._id;
+                result.redirect("/");
+            } else {
+                result.render("login", {
+                    "error": "Password is not correct",
+                    "message": ""
+                });
+            }
         }
-    });
+    } catch (error) {
+        console.error(error);
+        result.render("login", {
+            "error": "An error occurred during login",
+            "message": ""
+        });
+    }
 });
 
 router.get("/logout", function (request, result) {
